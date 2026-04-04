@@ -1,0 +1,255 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>ESP32-CAM Multi-Camera Dashboard</title>
+  <link rel="stylesheet" href="/static/style.css" />
+</head>
+<body>
+
+  <!-- ══════════════════════════════════════════
+       TOPBAR
+  ══════════════════════════════════════════ -->
+  <header class="topbar">
+    <div class="topbar-brand">
+      <svg class="brand-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+        <path d="M23 7l-7 5 7 5V7z"/><rect x="1" y="5" width="15" height="14" rx="2"/>
+      </svg>
+      <span class="brand-title">ESP32-CAM</span>
+      <span class="brand-sub">Control Center</span>
+    </div>
+
+    <div class="topbar-status">
+      <span class="ws-indicator" id="wsIndicator">
+        <span class="ws-dot" id="wsDot"></span>
+        <span id="wsText">Connecting…</span>
+      </span>
+      <div class="topbar-divider"></div>
+      <span class="stat-chip" id="camCountChip">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M23 7l-7 5 7 5V7z"/><rect x="1" y="5" width="15" height="14" rx="2"/></svg>
+        <span id="camCount">0</span> cameras
+      </span>
+      <span class="stat-chip" id="fpsChip">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg>
+        <span id="globalFps">0</span> fps avg
+      </span>
+    </div>
+
+    <div class="topbar-actions">
+      <div class="grid-picker" title="Grid columns">
+        <button class="gcol-btn active" data-cols="1">1</button>
+        <button class="gcol-btn" data-cols="2">2</button>
+        <button class="gcol-btn" data-cols="3">3</button>
+        <button class="gcol-btn" data-cols="4">4</button>
+      </div>
+      <button class="icon-btn" id="osdToggleBtn" title="Toggle OSD">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="3" width="20" height="14" rx="2"/><line x1="8" y1="21" x2="16" y2="21"/><line x1="12" y1="17" x2="12" y2="21"/></svg>
+      </button>
+      <button class="icon-btn" id="settingsBtn" title="Settings">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
+      </button>
+    </div>
+  </header>
+
+  <!-- ══════════════════════════════════════════
+       SETTINGS DRAWER
+  ══════════════════════════════════════════ -->
+  <aside class="settings-drawer hidden" id="settingsDrawer">
+    <div class="drawer-header">
+      <span>Settings</span>
+      <button class="icon-btn" id="closeDrawer">✕</button>
+    </div>
+    <div class="drawer-body">
+      <div class="field-group">
+        <label class="field-label">WebSocket URL</label>
+        <input class="field-input" type="text" id="serverUrl" placeholder="ws://host:8000/ws/stream" />
+      </div>
+      <div class="field-group">
+        <label class="field-label">API Key <span class="field-hint">(optional)</span></label>
+        <input class="field-input" type="password" id="apiKey" placeholder="Leave blank to disable" />
+      </div>
+      <div class="field-group">
+        <label class="field-label">OSD font size</label>
+        <input class="field-input" type="number" id="osdFontSize" value="12" min="8" max="20" />
+      </div>
+      <div class="toggle-row">
+        <label class="toggle-label">Show OSD by default</label>
+        <label class="toggle-switch">
+          <input type="checkbox" id="osdDefault" checked />
+          <span class="toggle-track"><span class="toggle-thumb"></span></span>
+        </label>
+      </div>
+    </div>
+    <div class="drawer-footer">
+      <button class="btn-primary" id="saveSettings">Save &amp; Reconnect</button>
+    </div>
+  </aside>
+
+  <!-- ══════════════════════════════════════════
+       WORKSPACE
+  ══════════════════════════════════════════ -->
+  <main class="workspace" id="workspace">
+
+    <!-- Empty state -->
+    <div class="empty-state" id="emptyState">
+      <div class="empty-icon">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.2">
+          <path d="M23 7l-7 5 7 5V7z"/><rect x="1" y="5" width="15" height="14" rx="2"/>
+        </svg>
+      </div>
+      <h2>Waiting for cameras</h2>
+      <p>Power on your ESP32-CAM devices.<br>They will appear here automatically once streaming begins.</p>
+      <div class="empty-pulse"></div>
+    </div>
+
+    <!-- Camera grid -->
+    <div class="cam-grid" id="camGrid"></div>
+
+  </main>
+
+  <!-- ══════════════════════════════════════════
+       CAMERA CARD TEMPLATE
+  ══════════════════════════════════════════ -->
+  <template id="camCardTemplate">
+    <article class="cam-card" data-id="">
+
+      <!-- ── Card header ──────────────────────── -->
+      <div class="card-header">
+        <div class="card-title">
+          <span class="online-dot"></span>
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M23 7l-7 5 7 5V7z"/><rect x="1" y="5" width="15" height="14" rx="2"/></svg>
+          <span class="card-cam-name">Camera #<span class="cam-num"></span></span>
+          <span class="ip-tag ip-label"></span>
+        </div>
+        <div class="card-header-actions">
+          <button class="hdr-btn stream-toggle-btn" title="Pause / Resume">
+            <svg class="icon-pause" viewBox="0 0 24 24" fill="currentColor"><rect x="6" y="4" width="4" height="16"/><rect x="14" y="4" width="4" height="16"/></svg>
+            <svg class="icon-play hidden" viewBox="0 0 24 24" fill="currentColor"><polygon points="5 3 19 12 5 21 5 3"/></svg>
+          </button>
+          <button class="hdr-btn restart-btn" title="Restart camera">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="1 4 1 10 7 10"/><path d="M3.51 15a9 9 0 1 0 .49-5.1L1 10"/></svg>
+          </button>
+        </div>
+      </div>
+
+      <!-- ── Video + OSD ──────────────────────── -->
+      <div class="video-wrap">
+        <!-- Canvas for video + OSD drawn directly on it -->
+        <canvas class="vid-canvas"></canvas>
+
+        <!-- Offline screen -->
+        <div class="offline-screen">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><line x1="1" y1="1" x2="23" y2="23"/><path d="M21 21H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h3m3-3h6l2 3h3a2 2 0 0 1 2 2v9.34"/></svg>
+          <span>Camera Offline</span>
+        </div>
+
+        <!-- Flash badge overlay (top-right) -->
+        <div class="flash-badge hidden">
+          <svg viewBox="0 0 24 24" fill="currentColor"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>
+        </div>
+      </div>
+
+      <!-- ── Controls panel ───────────────────── -->
+      <div class="controls-panel">
+
+        <!-- LEFT: Flash control -->
+        <section class="ctrl-section flash-section">
+          <div class="ctrl-section-title">
+            <svg viewBox="0 0 24 24" fill="currentColor"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>
+            Flash
+          </div>
+          <div class="flash-row">
+            <button class="flash-btn flash-off-btn active" data-state="off">OFF</button>
+            <button class="flash-btn flash-on-btn" data-state="on">ON</button>
+          </div>
+          <div class="slider-row">
+            <svg class="slider-icon" viewBox="0 0 24 24" fill="currentColor"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>
+            <input type="range" class="styled-range flash-brightness" min="0" max="255" value="200" />
+            <span class="range-val flash-bri-val">200</span>
+          </div>
+        </section>
+
+        <div class="ctrl-divider"></div>
+
+        <!-- RIGHT: Camera config -->
+        <section class="ctrl-section config-section">
+          <div class="ctrl-section-title">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
+            Camera Config
+          </div>
+
+          <div class="config-grid">
+            <label class="cfg-label">Resolution</label>
+            <select class="cfg-select res-select">
+              <option value="QVGA">320×240 QVGA</option>
+              <option value="VGA">640×480 VGA</option>
+              <option value="SVGA">800×600 SVGA</option>
+              <option value="HD" selected>1280×720 HD</option>
+              <option value="SXGA">1280×1024 SXGA</option>
+              <option value="UXGA">1600×1200 UXGA</option>
+            </select>
+
+            <label class="cfg-label">JPEG Quality <span class="cfg-val quality-val">12</span></label>
+            <input type="range" class="styled-range quality-range" min="4" max="63" value="12" />
+
+            <label class="cfg-label">FPS Limit <span class="cfg-val fps-limit-val">15</span></label>
+            <input type="range" class="styled-range fps-range" min="1" max="30" value="15" />
+          </div>
+
+          <!-- Sensor controls -->
+          <div class="sensor-divider"></div>
+          <div class="ctrl-section-title" style="margin-top:.1rem">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
+            Sensor
+          </div>
+
+          <div class="config-grid">
+            <label class="cfg-label">Brightness <span class="cfg-val brightness-val">0</span></label>
+            <input type="range" class="styled-range brightness-range" min="-2" max="2" step="1" value="0" />
+
+            <label class="cfg-label">Contrast <span class="cfg-val contrast-val">0</span></label>
+            <input type="range" class="styled-range contrast-range" min="-2" max="2" step="1" value="0" />
+
+            <label class="cfg-label">Saturation <span class="cfg-val saturation-val">0</span></label>
+            <input type="range" class="styled-range saturation-range" min="-2" max="2" step="1" value="0" />
+          </div>
+
+          <div class="sensor-toggles">
+            <div class="sensor-toggle-row">
+              <span class="sensor-label">AWB</span>
+              <label class="toggle-switch">
+                <input type="checkbox" class="awb-toggle" checked />
+                <span class="toggle-track"><span class="toggle-thumb"></span></span>
+              </label>
+            </div>
+            <div class="sensor-toggle-row">
+              <span class="sensor-label">AGC</span>
+              <label class="toggle-switch">
+                <input type="checkbox" class="agc-toggle" checked />
+                <span class="toggle-track"><span class="toggle-thumb"></span></span>
+              </label>
+            </div>
+            <div class="sensor-toggle-row">
+              <span class="sensor-label">AEC</span>
+              <label class="toggle-switch">
+                <input type="checkbox" class="aec-toggle" checked />
+                <span class="toggle-track"><span class="toggle-thumb"></span></span>
+              </label>
+            </div>
+          </div>
+
+          <div class="config-actions">
+            <button class="action-btn apply-btn">Apply</button>
+          </div>
+        </section>
+
+      </div>
+      <!-- /controls-panel -->
+
+    </article>
+  </template>
+
+  <script src="/static/app.js"></script>
+</body>
+</html>
