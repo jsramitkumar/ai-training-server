@@ -3,249 +3,365 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>ESP32-CAM Multi-Camera Dashboard</title>
+  <title>ESP32-CAM · Control Center</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet" />
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script>
+    tailwind.config = {
+      theme: {
+        extend: {
+          colors: {
+            bg:    '#0a0e13',
+            s1:    '#111820',
+            s2:    '#161d27',
+            s3:    '#1c2534',
+            s4:    '#222e40',
+            bd:    '#2a3547',
+            bdhi:  '#3d5275',
+            ink:   '#dce8f5',
+            muted: '#6b7f9a',
+            dim:   '#3d4f63',
+            accent:'#4da8ff',
+            ok:    '#3de07a',
+            warn:  '#f0c040',
+            err:   '#ff4d4d',
+          },
+          fontFamily: {
+            sans: ['Inter', 'system-ui', '-apple-system', 'sans-serif'],
+            mono: ['"JetBrains Mono"', '"Courier New"', 'monospace'],
+          },
+          boxShadow: {
+            card:   '0 4px 24px rgba(0,0,0,.5)',
+            topbar: '0 2px 12px rgba(0,0,0,.4)',
+          },
+        }
+      }
+    }
+  </script>
   <link rel="stylesheet" href="/static/style.css" />
 </head>
-<body>
+<body class="bg-bg text-ink text-[13px] font-sans min-h-screen flex flex-col overflow-x-hidden">
 
-  <!-- ══════════════════════════════════════════
+  <!-- ═══════════════════════════════════════════════════════════════
        TOPBAR
-  ══════════════════════════════════════════ -->
-  <header class="topbar">
-    <div class="topbar-brand">
-      <svg class="brand-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+  ═══════════════════════════════════════════════════════════════════ -->
+  <header class="sticky top-0 z-50 h-[52px] flex items-center gap-4 px-5 bg-s1 border-b border-bd shadow-topbar select-none">
+
+    <!-- Brand -->
+    <div class="flex items-center gap-2 flex-shrink-0">
+      <svg class="w-[22px] h-[22px] text-accent" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
         <path d="M23 7l-7 5 7 5V7z"/><rect x="1" y="5" width="15" height="14" rx="2"/>
       </svg>
-      <span class="brand-title">ESP32-CAM</span>
-      <span class="brand-sub">Control Center</span>
+      <span class="font-bold text-[15px] tracking-tight">ESP32-CAM</span>
+      <span class="hidden sm:inline-flex text-[11px] text-muted px-2 py-0.5 bg-s3 border border-bd rounded-full leading-5">Control Center</span>
     </div>
 
-    <div class="topbar-status">
-      <span class="ws-indicator" id="wsIndicator">
+    <!-- Status chips -->
+    <div class="flex-1 flex items-center gap-2.5 justify-center min-w-0">
+      <span id="wsIndicator" class="flex items-center gap-1.5 text-[12px] text-muted whitespace-nowrap">
         <span class="ws-dot" id="wsDot"></span>
         <span id="wsText">Connecting…</span>
       </span>
-      <div class="topbar-divider"></div>
-      <span class="stat-chip" id="camCountChip">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M23 7l-7 5 7 5V7z"/><rect x="1" y="5" width="15" height="14" rx="2"/></svg>
-        <span id="camCount">0</span> cameras
+      <div class="hidden sm:block w-px h-4 bg-bd flex-shrink-0"></div>
+      <span id="camCountChip" class="hidden sm:flex items-center gap-1.5 px-2.5 py-1 bg-s3 border border-bd rounded-full text-[11px] text-muted whitespace-nowrap">
+        <svg class="w-3 h-3 flex-shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M23 7l-7 5 7 5V7z"/><rect x="1" y="5" width="15" height="14" rx="2"/></svg>
+        <span id="camCount">0</span> cams
       </span>
-      <span class="stat-chip" id="fpsChip">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg>
+      <span id="fpsChip" class="hidden md:flex items-center gap-1.5 px-2.5 py-1 bg-s3 border border-bd rounded-full text-[11px] text-muted whitespace-nowrap">
+        <svg class="w-3 h-3 flex-shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg>
         <span id="globalFps">0</span> fps avg
       </span>
     </div>
 
-    <div class="topbar-actions">
-      <div class="grid-picker" title="Grid columns">
-        <button class="gcol-btn active" data-cols="1">1</button>
-        <button class="gcol-btn" data-cols="2">2</button>
-        <button class="gcol-btn" data-cols="3">3</button>
-        <button class="gcol-btn" data-cols="4">4</button>
+    <!-- Actions -->
+    <div class="flex items-center gap-1.5 flex-shrink-0">
+      <!-- Grid picker -->
+      <div class="flex gap-[2px] p-[2px] bg-s3 border border-bd rounded-md" title="Grid columns">
+        <button class="gcol-btn w-7 h-6 rounded text-[11px] font-semibold cursor-pointer transition-all duration-150 active" data-cols="1">1</button>
+        <button class="gcol-btn w-7 h-6 rounded text-[11px] font-semibold cursor-pointer transition-all duration-150" data-cols="2">2</button>
+        <button class="gcol-btn w-7 h-6 rounded text-[11px] font-semibold cursor-pointer transition-all duration-150" data-cols="3">3</button>
+        <button class="gcol-btn w-7 h-6 rounded text-[11px] font-semibold cursor-pointer transition-all duration-150" data-cols="4">4</button>
       </div>
-      <button class="icon-btn" id="osdToggleBtn" title="Toggle OSD">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="3" width="20" height="14" rx="2"/><line x1="8" y1="21" x2="16" y2="21"/><line x1="12" y1="17" x2="12" y2="21"/></svg>
+      <!-- OSD toggle -->
+      <button id="osdToggleBtn" class="icon-btn w-8 h-8 flex items-center justify-center bg-s3 border border-bd rounded-md text-muted cursor-pointer transition-all duration-150 hover:bg-s4 hover:text-ink hover:border-bdhi" title="Toggle OSD">
+        <svg class="w-[15px] h-[15px]" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="3" width="20" height="14" rx="2"/><line x1="8" y1="21" x2="16" y2="21"/><line x1="12" y1="17" x2="12" y2="21"/></svg>
       </button>
-      <button class="icon-btn" id="settingsBtn" title="Settings">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
+      <!-- Diagnostics toggle -->
+      <button id="diagBtn" class="icon-btn w-8 h-8 flex items-center justify-center bg-s3 border border-bd rounded-md text-muted cursor-pointer transition-all duration-150 hover:bg-s4 hover:text-ink hover:border-bdhi" title="Toggle Diagnostics">
+        <svg class="w-[15px] h-[15px]" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg>
+      </button>
+      <!-- Settings -->
+      <button id="settingsBtn" class="icon-btn w-8 h-8 flex items-center justify-center bg-s3 border border-bd rounded-md text-muted cursor-pointer transition-all duration-150 hover:bg-s4 hover:text-ink hover:border-bdhi" title="Settings">
+        <svg class="w-[15px] h-[15px]" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
       </button>
     </div>
+
   </header>
 
-  <!-- ══════════════════════════════════════════
+  <!-- ═══════════════════════════════════════════════════════════════
        SETTINGS DRAWER
-  ══════════════════════════════════════════ -->
-  <aside class="settings-drawer hidden" id="settingsDrawer">
-    <div class="drawer-header">
-      <span>Settings</span>
-      <button class="icon-btn" id="closeDrawer">✕</button>
+  ═══════════════════════════════════════════════════════════════════ -->
+  <aside class="settings-drawer fixed top-[52px] right-0 bottom-0 w-[300px] z-[300] bg-s1 border-l border-bd shadow-[-8px_0_32px_rgba(0,0,0,.55)] flex flex-col hidden" id="settingsDrawer">
+    <div class="flex items-center justify-between px-4 py-3.5 border-b border-bd">
+      <span class="font-semibold text-[15px]">Settings</span>
+      <button id="closeDrawer" class="icon-btn w-8 h-8 flex items-center justify-center bg-s3 border border-bd rounded-md text-muted cursor-pointer hover:bg-s4 hover:text-ink hover:border-bdhi transition-all duration-150">✕</button>
     </div>
-    <div class="drawer-body">
-      <div class="field-group">
-        <label class="field-label">WebSocket URL</label>
-        <input class="field-input" type="text" id="serverUrl" placeholder="ws://host:8000/ws/stream" />
+    <div class="flex-1 overflow-y-auto px-4 py-5 flex flex-col gap-5">
+      <div class="flex flex-col gap-1.5">
+        <label class="text-[11px] font-semibold text-muted uppercase tracking-[.06em]">WebSocket URL</label>
+        <input class="bg-s3 border border-bd rounded-lg text-ink px-3 py-2 text-[13px] w-full transition-all" type="text" id="serverUrl" placeholder="ws://host:8000/ws/stream" />
       </div>
-      <div class="field-group">
-        <label class="field-label">API Key <span class="field-hint">(optional)</span></label>
-        <input class="field-input" type="password" id="apiKey" placeholder="Leave blank to disable" />
+      <div class="flex flex-col gap-1.5">
+        <label class="text-[11px] font-semibold text-muted uppercase tracking-[.06em]">API Key <span class="text-dim normal-case tracking-normal font-normal">(optional)</span></label>
+        <input class="bg-s3 border border-bd rounded-lg text-ink px-3 py-2 text-[13px] w-full transition-all" type="password" id="apiKey" placeholder="Leave blank to disable" />
       </div>
-      <div class="field-group">
-        <label class="field-label">OSD font size</label>
-        <input class="field-input" type="number" id="osdFontSize" value="12" min="8" max="20" />
+      <div class="flex flex-col gap-1.5">
+        <label class="text-[11px] font-semibold text-muted uppercase tracking-[.06em]">OSD Font Size</label>
+        <input class="bg-s3 border border-bd rounded-lg text-ink px-3 py-2 text-[13px] w-full transition-all" type="number" id="osdFontSize" value="12" min="8" max="20" />
       </div>
-      <div class="toggle-row">
-        <label class="toggle-label">Show OSD by default</label>
+      <div class="flex items-center justify-between py-1">
+        <span class="text-[13px] text-muted">Show OSD by default</span>
         <label class="toggle-switch">
           <input type="checkbox" id="osdDefault" checked />
           <span class="toggle-track"><span class="toggle-thumb"></span></span>
         </label>
       </div>
     </div>
-    <div class="drawer-footer">
-      <button class="btn-primary" id="saveSettings">Save &amp; Reconnect</button>
+    <div class="px-4 py-4 border-t border-bd">
+      <button id="saveSettings" class="w-full py-2.5 bg-accent text-bg font-bold text-[13px] rounded-lg cursor-pointer hover:brightness-110 active:brightness-90 transition-all border-none">Save &amp; Reconnect</button>
     </div>
   </aside>
 
-  <!-- ══════════════════════════════════════════
+  <!-- ═══════════════════════════════════════════════════════════════
+       DIAGNOSTICS BAR  (toggled by Diag button)
+  ═══════════════════════════════════════════════════════════════════ -->
+  <div id="diagBar" class="hidden bg-s2 border-b border-bd px-5 py-2 font-mono text-[11px] text-muted flex flex-wrap gap-x-5 gap-y-1 items-center">
+    <span class="text-accent font-bold uppercase tracking-widest text-[10px]">Diagnostics</span>
+    <span>UDP pkts: <span id="dUdpPkts" class="text-ink">—</span></span>
+    <span>Sources: <span id="dUdpSrc" class="text-ink">—</span></span>
+    <span>Assembled: <span id="dAssembled" class="text-ink">—</span></span>
+    <span>Pushed: <span id="dPushed" class="text-ink">—</span></span>
+    <span>Stale drops: <span id="dStale" class="text-warn">—</span></span>
+    <span>Bad JPEG: <span id="dBadJpeg" class="text-err">—</span></span>
+    <span>WS subs: <span id="dWsSubs" class="text-ink">—</span></span>
+    <span>Open bufs: <span id="dOpenBufs" class="text-ink">—</span></span>
+    <span>WS msgs rx: <span id="dWsMsgs" class="text-ok">—</span></span>
+    <span>Frames rendered: <span id="dRendered" class="text-ok">—</span></span>
+    <button id="diagRefreshBtn" class="ml-2 px-2 py-0.5 bg-s3 border border-bd rounded text-muted hover:text-ink cursor-pointer text-[10px] transition-colors">Refresh</button>
+  </div>
+
+  <!-- ═══════════════════════════════════════════════════════════════
        WORKSPACE
-  ══════════════════════════════════════════ -->
-  <main class="workspace" id="workspace">
+  ═══════════════════════════════════════════════════════════════════ -->
+  <main class="flex-1 px-5 py-4 max-w-[2000px] mx-auto w-full" id="workspace">
 
     <!-- Empty state -->
-    <div class="empty-state" id="emptyState">
-      <div class="empty-icon">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.2">
+    <div class="flex flex-col items-center justify-center gap-4 py-32 text-center select-none" id="emptyState">
+      <div class="text-dim opacity-40">
+        <svg class="w-20 h-20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.2">
           <path d="M23 7l-7 5 7 5V7z"/><rect x="1" y="5" width="15" height="14" rx="2"/>
         </svg>
       </div>
-      <h2>Waiting for cameras</h2>
-      <p>Power on your ESP32-CAM devices.<br>They will appear here automatically once streaming begins.</p>
-      <div class="empty-pulse"></div>
+      <h2 class="text-[22px] font-semibold text-muted">Waiting for cameras</h2>
+      <p class="text-[13px] text-dim leading-relaxed max-w-md">Power on your ESP32-CAM devices.<br>They will appear here automatically once streaming begins.</p>
+      <div class="w-2.5 h-2.5 rounded-full bg-accent mt-2 empty-pulse-anim"></div>
     </div>
 
     <!-- Camera grid -->
-    <div class="cam-grid" id="camGrid"></div>
+    <div class="cam-grid grid gap-4" id="camGrid" style="grid-template-columns: repeat(var(--cols, 2), 1fr)"></div>
 
   </main>
 
-  <!-- ══════════════════════════════════════════
+  <!-- ═══════════════════════════════════════════════════════════════
        CAMERA CARD TEMPLATE
-  ══════════════════════════════════════════ -->
+  ═══════════════════════════════════════════════════════════════════ -->
   <template id="camCardTemplate">
-    <article class="cam-card" data-id="">
+    <article class="cam-card bg-s1 border border-bd rounded-xl overflow-hidden shadow-card flex flex-col transition-all duration-200 hover:border-bdhi" data-id="">
 
-      <!-- ── Card header ──────────────────────── -->
-      <div class="card-header">
-        <div class="card-title">
+      <!-- Card header -->
+      <div class="card-header flex items-center justify-between px-4 py-2.5 bg-s2 border-b border-bd gap-2">
+        <div class="card-title flex items-center gap-2 font-semibold text-[13px] min-w-0">
           <span class="online-dot"></span>
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M23 7l-7 5 7 5V7z"/><rect x="1" y="5" width="15" height="14" rx="2"/></svg>
-          <span class="card-cam-name">Camera #<span class="cam-num"></span></span>
-          <span class="ip-tag ip-label"></span>
+          <svg class="w-4 h-4 text-accent flex-shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M23 7l-7 5 7 5V7z"/><rect x="1" y="5" width="15" height="14" rx="2"/></svg>
+          <span class="truncate text-ink">Camera #<span class="cam-num font-bold"></span></span>
+          <span class="ip-label font-mono text-[10px] text-muted bg-s3 border border-bd rounded px-1.5 py-0.5 truncate max-w-[120px] flex-shrink-0"></span>
         </div>
-        <div class="card-header-actions">
-          <button class="hdr-btn stream-toggle-btn" title="Pause / Resume">
-            <svg class="icon-pause" viewBox="0 0 24 24" fill="currentColor"><rect x="6" y="4" width="4" height="16"/><rect x="14" y="4" width="4" height="16"/></svg>
-            <svg class="icon-play hidden" viewBox="0 0 24 24" fill="currentColor"><polygon points="5 3 19 12 5 21 5 3"/></svg>
+        <div class="card-header-actions flex gap-1.5 flex-shrink-0">
+          <button class="stream-toggle-btn hdr-btn w-[30px] h-7 flex items-center justify-center bg-s3 border border-bd rounded-md text-muted cursor-pointer hover:bg-s4 hover:text-ink hover:border-bdhi transition-all duration-150" title="Pause / Resume">
+            <svg class="icon-pause w-3 h-3" viewBox="0 0 24 24" fill="currentColor"><rect x="6" y="4" width="4" height="16"/><rect x="14" y="4" width="4" height="16"/></svg>
+            <svg class="icon-play hidden w-3 h-3" viewBox="0 0 24 24" fill="currentColor"><polygon points="5 3 19 12 5 21 5 3"/></svg>
           </button>
-          <button class="hdr-btn restart-btn" title="Restart camera">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="1 4 1 10 7 10"/><path d="M3.51 15a9 9 0 1 0 .49-5.1L1 10"/></svg>
+          <button class="restart-btn hdr-btn w-[30px] h-7 flex items-center justify-center bg-s3 border border-bd rounded-md text-muted cursor-pointer hover:bg-s4 hover:text-err hover:border-err transition-all duration-150" title="Restart camera">
+            <svg class="w-3 h-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="1 4 1 10 7 10"/><path d="M3.51 15a9 9 0 1 0 .49-5.1L1 10"/></svg>
           </button>
         </div>
       </div>
 
-      <!-- ── Video + OSD ──────────────────────── -->
-      <div class="video-wrap">
-        <!-- Canvas for video + OSD drawn directly on it -->
-        <canvas class="vid-canvas"></canvas>
-
-        <!-- Offline screen -->
-        <div class="offline-screen">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><line x1="1" y1="1" x2="23" y2="23"/><path d="M21 21H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h3m3-3h6l2 3h3a2 2 0 0 1 2 2v9.34"/></svg>
+      <!-- Video + OSD canvas -->
+      <div class="video-wrap relative bg-black overflow-hidden" style="aspect-ratio:16/9">
+        <canvas class="vid-canvas w-full h-full transition-opacity duration-300"></canvas>
+        <!-- Offline overlay -->
+        <div class="offline-screen absolute inset-0 flex-col items-center justify-center gap-3 text-muted text-[13px] backdrop-blur-sm" style="background:rgba(5,9,14,.88)">
+          <svg class="w-10 h-10 opacity-40" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><line x1="1" y1="1" x2="23" y2="23"/><path d="M21 21H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h3m3-3h6l2 3h3a2 2 0 0 1 2 2v9.34"/></svg>
           <span>Camera Offline</span>
         </div>
-
-        <!-- Flash badge overlay (top-right) -->
-        <div class="flash-badge hidden">
-          <svg viewBox="0 0 24 24" fill="currentColor"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>
+        <!-- Flash badge -->
+        <div class="flash-badge hidden absolute top-2 right-2 w-6 h-6 rounded-full flex items-center justify-center text-bg anim-flash-pulse" style="background:rgba(240,192,64,.92)">
+          <svg class="w-3 h-3" viewBox="0 0 24 24" fill="currentColor"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>
         </div>
       </div>
 
-      <!-- ── Controls panel ───────────────────── -->
-      <div class="controls-panel">
+      <!-- Controls: tabbed panel -->
+      <div class="controls-panel bg-s2 border-t border-bd flex flex-col">
 
-        <!-- LEFT: Flash control -->
-        <section class="ctrl-section flash-section">
-          <div class="ctrl-section-title">
-            <svg viewBox="0 0 24 24" fill="currentColor"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>
+        <!-- Tab strip -->
+        <div class="flex border-b border-bd bg-s1">
+          <button class="ctrl-tab active flex-1 flex items-center justify-center gap-1.5 py-2 text-[11px] font-bold uppercase tracking-[.07em] border-b-2 cursor-pointer" data-tab="stream">
+            <svg class="w-[10px] h-[10px] flex-shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg>
+            Stream
+          </button>
+          <button class="ctrl-tab flex-1 flex items-center justify-center gap-1.5 py-2 text-[11px] font-bold uppercase tracking-[.07em] border-b-2 cursor-pointer" data-tab="flash">
+            <svg class="w-[10px] h-[10px] flex-shrink-0" viewBox="0 0 24 24" fill="currentColor"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>
             Flash
-          </div>
-          <div class="flash-row">
-            <button class="flash-btn flash-off-btn active" data-state="off">OFF</button>
-            <button class="flash-btn flash-on-btn" data-state="on">ON</button>
-          </div>
-          <div class="slider-row">
-            <svg class="slider-icon" viewBox="0 0 24 24" fill="currentColor"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>
-            <input type="range" class="styled-range flash-brightness" min="0" max="255" value="200" />
-            <span class="range-val flash-bri-val">200</span>
-          </div>
-        </section>
-
-        <div class="ctrl-divider"></div>
-
-        <!-- RIGHT: Camera config -->
-        <section class="ctrl-section config-section">
-          <div class="ctrl-section-title">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
-            Camera Config
-          </div>
-
-          <div class="config-grid">
-            <label class="cfg-label">Resolution</label>
-            <select class="cfg-select res-select">
-              <option value="QVGA">320×240 QVGA</option>
-              <option value="VGA">640×480 VGA</option>
-              <option value="SVGA">800×600 SVGA</option>
-              <option value="HD" selected>1280×720 HD</option>
-              <option value="SXGA">1280×1024 SXGA</option>
-              <option value="UXGA">1600×1200 UXGA</option>
-            </select>
-
-            <label class="cfg-label">JPEG Quality <span class="cfg-val quality-val">12</span></label>
-            <input type="range" class="styled-range quality-range" min="4" max="63" value="12" />
-
-            <label class="cfg-label">FPS Limit <span class="cfg-val fps-limit-val">15</span></label>
-            <input type="range" class="styled-range fps-range" min="1" max="30" value="15" />
-          </div>
-
-          <!-- Sensor controls -->
-          <div class="sensor-divider"></div>
-          <div class="ctrl-section-title" style="margin-top:.1rem">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
+          </button>
+          <button class="ctrl-tab flex-1 flex items-center justify-center gap-1.5 py-2 text-[11px] font-bold uppercase tracking-[.07em] border-b-2 cursor-pointer" data-tab="sensor">
+            <svg class="w-[10px] h-[10px] flex-shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
             Sensor
+          </button>
+        </div>
+
+        <!-- Pane: Stream config -->
+        <div class="tab-pane active p-3 flex-col gap-2.5" data-pane="stream">
+          <div class="grid gap-x-3 gap-y-2 items-center" style="grid-template-columns:auto 1fr">
+            <span class="text-[11px] text-muted font-medium">Resolution</span>
+            <select class="res-select cfg-select w-full bg-s3 border border-bd rounded-md text-ink px-2 py-1 text-[12px] cursor-pointer focus:outline-none transition-colors">
+              <option value="QVGA">QVGA 320×240</option>
+              <option value="VGA">VGA 640×480</option>
+              <option value="SVGA">SVGA 800×600</option>
+              <option value="HD" selected>HD 1280×720</option>
+              <option value="SXGA">SXGA 1280×1024</option>
+              <option value="UXGA">UXGA 1600×1200</option>
+            </select>
+            <span class="text-[11px] text-muted font-medium">Quality</span>
+            <div class="flex items-center gap-2">
+              <input type="range" class="styled-range quality-range flex-1" min="4" max="63" value="12" />
+              <span class="quality-val font-mono text-[11px] text-accent min-w-[22px] text-right tabular-nums">12</span>
+            </div>
+            <span class="text-[11px] text-muted font-medium">FPS Limit</span>
+            <div class="flex items-center gap-2">
+              <input type="range" class="styled-range fps-range flex-1" min="1" max="30" value="15" />
+              <span class="fps-limit-val font-mono text-[11px] text-accent min-w-[22px] text-right tabular-nums">15</span>
+            </div>
+          </div>
+          <div class="flex justify-end pt-0.5">
+            <button class="apply-btn px-4 py-1.5 bg-accent text-bg font-bold text-[12px] rounded-md cursor-pointer hover:brightness-110 active:brightness-90 active:scale-[.97] transition-all border-none">Apply</button>
+          </div>
+        </div>
+
+        <!-- Pane: Flash -->
+        <div class="tab-pane p-3 flex-col gap-2.5" data-pane="flash">
+          <div class="flex gap-2">
+            <button class="flash-off-btn active flex-1 py-1.5 bg-s3 border border-bd rounded-md text-muted text-[12px] font-bold tracking-[.04em] cursor-pointer hover:bg-s4 hover:text-ink transition-all duration-150">OFF</button>
+            <button class="flash-on-btn flex-1 py-1.5 bg-s3 border border-bd rounded-md text-muted text-[12px] font-bold tracking-[.04em] cursor-pointer hover:bg-s4 hover:text-ink transition-all duration-150">ON</button>
+          </div>
+          <div class="flex items-center gap-2.5">
+            <svg class="w-3 h-3 text-warn flex-shrink-0" viewBox="0 0 24 24" fill="currentColor"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>
+            <input type="range" class="styled-range flash-brightness flex-1" min="0" max="255" value="200" />
+            <span class="flash-bri-val font-mono text-[11px] text-muted min-w-[26px] text-right tabular-nums">200</span>
+          </div>
+        </div>
+
+        <!-- Pane: Sensor -->
+        <div class="tab-pane p-3 flex-col gap-2.5" data-pane="sensor">
+          <!-- Sliders: brightness / contrast / saturation -->
+          <div class="grid gap-x-3 gap-y-2 items-center" style="grid-template-columns:auto 1fr">
+            <span class="text-[11px] text-muted font-medium">Brightness</span>
+            <div class="flex items-center gap-2">
+              <input type="range" class="styled-range sensor-range brightness-range flex-1" min="-2" max="2" step="1" value="0" />
+              <span class="brightness-val font-mono text-[11px] text-ok min-w-[22px] text-right tabular-nums">0</span>
+            </div>
+            <span class="text-[11px] text-muted font-medium">Contrast</span>
+            <div class="flex items-center gap-2">
+              <input type="range" class="styled-range sensor-range contrast-range flex-1" min="-2" max="2" step="1" value="0" />
+              <span class="contrast-val font-mono text-[11px] text-ok min-w-[22px] text-right tabular-nums">0</span>
+            </div>
+            <span class="text-[11px] text-muted font-medium">Saturation</span>
+            <div class="flex items-center gap-2">
+              <input type="range" class="styled-range sensor-range saturation-range flex-1" min="-2" max="2" step="1" value="0" />
+              <span class="saturation-val font-mono text-[11px] text-ok min-w-[22px] text-right tabular-nums">0</span>
+            </div>
           </div>
 
-          <div class="config-grid">
-            <label class="cfg-label">Brightness <span class="cfg-val brightness-val">0</span></label>
-            <input type="range" class="styled-range brightness-range" min="-2" max="2" step="1" value="0" />
-
-            <label class="cfg-label">Contrast <span class="cfg-val contrast-val">0</span></label>
-            <input type="range" class="styled-range contrast-range" min="-2" max="2" step="1" value="0" />
-
-            <label class="cfg-label">Saturation <span class="cfg-val saturation-val">0</span></label>
-            <input type="range" class="styled-range saturation-range" min="-2" max="2" step="1" value="0" />
+          <!-- Dropdowns: Special Effect + WB Mode -->
+          <div class="grid gap-x-3 gap-y-2 items-center pt-0.5" style="grid-template-columns:auto 1fr">
+            <span class="text-[11px] text-muted font-medium whitespace-nowrap">Effect</span>
+            <select class="cfg-select special-effect-select w-full bg-s3 border border-bd rounded-md text-ink px-2 py-1 text-[12px] cursor-pointer focus:outline-none transition-colors">
+              <option value="0">No Effect</option>
+              <option value="1">Negative</option>
+              <option value="2">Grayscale</option>
+              <option value="3">Red Tint</option>
+              <option value="4">Green Tint</option>
+              <option value="5">Blue Tint</option>
+              <option value="6">Sepia</option>
+            </select>
+            <span class="text-[11px] text-muted font-medium whitespace-nowrap">WB Mode</span>
+            <select class="cfg-select wb-mode-select w-full bg-s3 border border-bd rounded-md text-ink px-2 py-1 text-[12px] cursor-pointer focus:outline-none transition-colors">
+              <option value="0">Auto</option>
+              <option value="1">Sunny</option>
+              <option value="2">Cloudy</option>
+              <option value="3">Office</option>
+              <option value="4">Home</option>
+            </select>
           </div>
 
-          <div class="sensor-toggles">
-            <div class="sensor-toggle-row">
-              <span class="sensor-label">AWB</span>
+          <!-- Toggles: AWB / AGC / AEC / V-Flip / H-Mirror -->
+          <div class="flex gap-2 flex-wrap pt-1">
+            <div class="flex items-center gap-2 bg-s3 border border-bd rounded-md px-2.5 py-1">
+              <span class="text-[10px] font-bold uppercase tracking-[.05em] text-muted">AWB</span>
               <label class="toggle-switch">
                 <input type="checkbox" class="awb-toggle" checked />
                 <span class="toggle-track"><span class="toggle-thumb"></span></span>
               </label>
             </div>
-            <div class="sensor-toggle-row">
-              <span class="sensor-label">AGC</span>
+            <div class="flex items-center gap-2 bg-s3 border border-bd rounded-md px-2.5 py-1">
+              <span class="text-[10px] font-bold uppercase tracking-[.05em] text-muted">AGC</span>
               <label class="toggle-switch">
                 <input type="checkbox" class="agc-toggle" checked />
                 <span class="toggle-track"><span class="toggle-thumb"></span></span>
               </label>
             </div>
-            <div class="sensor-toggle-row">
-              <span class="sensor-label">AEC</span>
+            <div class="flex items-center gap-2 bg-s3 border border-bd rounded-md px-2.5 py-1">
+              <span class="text-[10px] font-bold uppercase tracking-[.05em] text-muted">AEC</span>
               <label class="toggle-switch">
                 <input type="checkbox" class="aec-toggle" checked />
                 <span class="toggle-track"><span class="toggle-thumb"></span></span>
               </label>
             </div>
+            <div class="flex items-center gap-2 bg-s3 border border-bd rounded-md px-2.5 py-1">
+              <svg class="w-[10px] h-[10px] text-muted flex-shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="17 1 21 5 17 9"/><path d="M3 11V9a4 4 0 0 1 4-4h14"/><polyline points="7 23 3 19 7 15"/><path d="M21 13v2a4 4 0 0 1-4 4H3"/></svg>
+              <span class="text-[10px] font-bold uppercase tracking-[.05em] text-muted">V-Flip</span>
+              <label class="toggle-switch">
+                <input type="checkbox" class="vflip-toggle" />
+                <span class="toggle-track"><span class="toggle-thumb"></span></span>
+              </label>
+            </div>
+            <div class="flex items-center gap-2 bg-s3 border border-bd rounded-md px-2.5 py-1">
+              <svg class="w-[10px] h-[10px] text-muted flex-shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="1 17 5 21 9 17"/><path d="M11 21H9a4 4 0 0 1-4-4V3"/><polyline points="23 7 19 3 15 7"/><path d="M13 3h2a4 4 0 0 1 4 4v14"/></svg>
+              <span class="text-[10px] font-bold uppercase tracking-[.05em] text-muted">H-Mirror</span>
+              <label class="toggle-switch">
+                <input type="checkbox" class="hmirror-toggle" />
+                <span class="toggle-track"><span class="toggle-thumb"></span></span>
+              </label>
+            </div>
           </div>
-
-          <div class="config-actions">
-            <button class="action-btn apply-btn">Apply</button>
+          <div class="flex justify-end pt-0.5">
+            <button class="sensor-apply-btn px-4 py-1.5 bg-ok text-bg font-bold text-[12px] rounded-md cursor-pointer hover:brightness-110 active:brightness-90 active:scale-[.97] transition-all border-none">Apply</button>
           </div>
-        </section>
+        </div>
 
-      </div>
-      <!-- /controls-panel -->
+      </div><!-- /controls-panel -->
 
     </article>
   </template>

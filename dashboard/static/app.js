@@ -69,6 +69,7 @@ function scheduleReconnect() {
 //  MESSAGE DISPATCH
 // ─────────────────────────────────────────────────────────────────
 function dispatch(msg) {
+  _wsMsgCount++;
   if      (msg.type === "frame") onFrame(msg);
   else if (msg.type === "stats") onStats(msg.cameras);
 }
@@ -89,12 +90,21 @@ function onFrame(msg) {
 
   if (cam.paused) return;
 
+  // Assign a monotonically increasing sequence number to this decode request.
+  // The .then() callback only draws if its seq still matches cam.renderSeq,
+  // which guarantees that a slow-decoding older frame can never overwrite a
+  // faster-decoding newer frame on the canvas (eliminates overlap/distortion).
+  const seq = ++cam.renderSeq;
+
   // base64 JPEG → Blob → ImageBitmap
   const bin  = atob(data);
   const buf  = new Uint8Array(bin.length);
   for (let i = 0; i < bin.length; i++) buf[i] = bin.charCodeAt(i);
 
   createImageBitmap(new Blob([buf], { type: "image/jpeg" })).then((bmp) => {
+    // Discard if a newer frame has already started decoding.
+    if (seq !== cam.renderSeq) { bmp.close(); return; }
+
     const { canvas, ctx } = cam;
     if (canvas.width !== bmp.width || canvas.height !== bmp.height) {
       canvas.width  = bmp.width;
@@ -102,6 +112,7 @@ function onFrame(msg) {
     }
     ctx.drawImage(bmp, 0, 0);
     bmp.close();
+    _renderedCount++;
     if (osdVisible) drawOSD(cam);
     setCardOnline(cam, true);
   }).catch(() => {});
@@ -217,6 +228,18 @@ function onStats(list) {
     if (wifi_rssi != null) cam.rssi = wifi_rssi;
     if (source_ip)   cam.sourceIp   = source_ip;
 
+    // Sync UI controls with polled sensor state.
+    // Guard vflip/hmirror: onStats fires every second but cam.vflip/hmirror on
+    // the server only updates every 30s (status poll).  If we blindly overwrite,
+    // the user's toggle gets reset within a second before the Apply fires.
+    // Only sync after a 5s grace period following any manual user change.
+    const p = cam.panel;
+    const flipReady = Date.now() > (cam._flipPendingUntil || 0);
+    if (s.vflip           != null && flipReady) p.querySelector(".vflip-toggle").checked  = s.vflip;
+    if (s.hmirror         != null && flipReady) p.querySelector(".hmirror-toggle").checked = s.hmirror;
+    if (s.special_effect  != null) p.querySelector(".special-effect-select").value = s.special_effect;
+    if (s.wb_mode         != null) p.querySelector(".wb-mode-select").value   = s.wb_mode;
+
     setCardOnline(cam, online);
 
     const ipEl = cam.panel.querySelector(".ip-label");
@@ -251,6 +274,14 @@ function createCard(camera_id) {
     fps: 0, latency_ms: 0, frame_id: 0,
     resolution: "—", rssi: null, sourceIp: null,
     flashOn: false, online: false, paused: false, lastFrame: 0,
+    // Serialise canvas draws: increment before each decode, check on resolve.
+    // If a newer frame arrived while we were decoding, the old promise's
+    // .then() sees seq !== cam.renderSeq and discards instead of drawing.
+    renderSeq: 0,
+    // Timestamp (ms) after which onStats may overwrite the vflip/hmirror
+    // checkboxes again.  Set 5s into the future whenever the user manually
+    // toggles to prevent the 1-second stats push from undoing the change.
+    _flipPendingUntil: 0,
   };
 
   cameras.set(camera_id, cam);
@@ -268,6 +299,16 @@ function createCard(camera_id) {
 function wireCard(cam) {
   const p  = cam.panel;
   const id = cam.id;
+
+  // Tab switching — wire each card's own tab strip
+  p.querySelectorAll(".ctrl-tab").forEach((tab) => {
+    tab.addEventListener("click", () => {
+      p.querySelectorAll(".ctrl-tab").forEach((t) => t.classList.remove("active"));
+      p.querySelectorAll(".tab-pane").forEach((t) => t.classList.remove("active"));
+      tab.classList.add("active");
+      p.querySelector(`.tab-pane[data-pane="${tab.dataset.tab}"]`).classList.add("active");
+    });
+  });
 
   // Pause / resume
   const streamBtn = p.querySelector(".stream-toggle-btn");
@@ -318,18 +359,40 @@ function wireCard(cam) {
   p.querySelector(".saturation-range").addEventListener("input", (e) =>
     p.querySelector(".saturation-val").textContent = e.target.value);
 
+  // Sensor Apply button
+  p.querySelector(".sensor-apply-btn").addEventListener("click", () => {
+    apiPost(`/api/cameras/${id}/config`, {
+      brightness:      parseInt(p.querySelector(".brightness-range").value),
+      contrast:        parseInt(p.querySelector(".contrast-range").value),
+      saturation:      parseInt(p.querySelector(".saturation-range").value),
+      awb:             p.querySelector(".awb-toggle").checked,
+      agc:             p.querySelector(".agc-toggle").checked,
+      aec:             p.querySelector(".aec-toggle").checked,
+      vflip:           p.querySelector(".vflip-toggle").checked,
+      hmirror:         p.querySelector(".hmirror-toggle").checked,
+      special_effect:  parseInt(p.querySelector(".special-effect-select").value),
+      wb_mode:         parseInt(p.querySelector(".wb-mode-select").value),
+    });
+  });
+
+  // V-Flip and H-Mirror fire immediately on toggle — do NOT wait for Apply.
+  // Also stamp cam._flipPendingUntil so onStats won't overwrite the checkbox
+  // with the server's stale state before the ESP32 acknowledges the change.
+  p.querySelector(".vflip-toggle").addEventListener("change", (e) => {
+    cam._flipPendingUntil = Date.now() + 5000;
+    apiPost(`/api/cameras/${id}/config`, { vflip: e.target.checked });
+  });
+  p.querySelector(".hmirror-toggle").addEventListener("change", (e) => {
+    cam._flipPendingUntil = Date.now() + 5000;
+    apiPost(`/api/cameras/${id}/config`, { hmirror: e.target.checked });
+  });
+
   // Apply config + sensor
   p.querySelector(".apply-btn").addEventListener("click", () => {
     apiPost(`/api/cameras/${id}/config`, {
       resolution:   p.querySelector(".res-select").value,
       jpeg_quality: parseInt(p.querySelector(".quality-range").value),
       fps_limit:    parseInt(p.querySelector(".fps-range").value),
-      brightness:   parseInt(p.querySelector(".brightness-range").value),
-      contrast:     parseInt(p.querySelector(".contrast-range").value),
-      saturation:   parseInt(p.querySelector(".saturation-range").value),
-      awb:          p.querySelector(".awb-toggle").checked,
-      agc:          p.querySelector(".agc-toggle").checked,
-      aec:          p.querySelector(".aec-toggle").checked,
     });
   });
 }
@@ -470,6 +533,53 @@ function initGridPicker() {
 }
 
 // ─────────────────────────────────────────────────────────────────
+//  DIAGNOSTICS PANEL
+// ─────────────────────────────────────────────────────────────────
+let _diagVisible  = false;
+let _diagTimer    = null;
+let _wsMsgCount   = 0;
+let _renderedCount = 0;
+
+function initDiag() {
+  el("diagBtn").addEventListener("click", () => {
+    _diagVisible = !_diagVisible;
+    el("diagBar").classList.toggle("hidden", !_diagVisible);
+    el("diagBtn").classList.toggle("text-accent", _diagVisible);
+    if (_diagVisible) { fetchDiag(); startDiagPolling(); }
+    else              { stopDiagPolling(); }
+  });
+  el("diagRefreshBtn").addEventListener("click", fetchDiag);
+}
+
+function startDiagPolling() {
+  stopDiagPolling();
+  _diagTimer = setInterval(fetchDiag, 2000);
+}
+function stopDiagPolling() {
+  if (_diagTimer) { clearInterval(_diagTimer); _diagTimer = null; }
+}
+
+async function fetchDiag() {
+  try {
+    const r = await fetch(`${BASE}/api/diag`);
+    if (!r.ok) return;
+    const d = await r.json();
+    const u = d.udp;
+    const f = d.frames;
+    el("dUdpPkts").textContent   = u.total_packets ?? "—";
+    el("dUdpSrc").textContent    = (u.sources && u.sources.length) ? u.sources.join(", ") : "none";
+    el("dAssembled").textContent = f.global_frames_assembled ?? "—";
+    el("dPushed").textContent    = f.global_frames_pushed    ?? "—";
+    el("dStale").textContent     = f.global_frames_stale     ?? "—";
+    el("dBadJpeg").textContent   = f.global_frames_bad_jpeg  ?? "—";
+    el("dWsSubs").textContent    = f.ws_subscribers          ?? "—";
+    el("dOpenBufs").textContent  = f.open_buffers            ?? "—";
+    el("dWsMsgs").textContent    = _wsMsgCount;
+    el("dRendered").textContent  = _renderedCount;
+  } catch (_) {}
+}
+
+// ─────────────────────────────────────────────────────────────────
 //  UTIL
 // ─────────────────────────────────────────────────────────────────
 function el(id) { return document.getElementById(id); }
@@ -482,5 +592,6 @@ document.addEventListener("DOMContentLoaded", () => {
   initSettings();
   initOsdToggle();
   initGridPicker();
+  initDiag();
   connect();
 });

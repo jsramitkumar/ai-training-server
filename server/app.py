@@ -3,8 +3,6 @@ FastAPI application — HTTP REST API, WebSocket stream, static dashboard.
 """
 
 import asyncio
-import base64
-import json
 import logging
 from pathlib import Path
 from typing import Optional
@@ -17,42 +15,47 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
 from camera_manager import CameraManager
+from udp_receiver import UDPReceiver
 from config import settings
 
 log = logging.getLogger("app")
 
 STATIC_DIR = Path(__file__).parent.parent / "dashboard"
 
-# ─────────────────────────────────────────────
-#  REQUEST / RESPONSE MODELS
-# ─────────────────────────────────────────────
+# ---------------------------------------------------------------------------
+#  REQUEST MODELS
+# ---------------------------------------------------------------------------
 
 class CameraConfigRequest(BaseModel):
-    resolution:   Optional[str]  = None
-    jpeg_quality: Optional[int]  = None
-    fps_limit:    Optional[int]  = None
-    brightness:   Optional[int]  = None
-    contrast:     Optional[int]  = None
-    saturation:   Optional[int]  = None
-    awb:          Optional[bool] = None
-    agc:          Optional[bool] = None
-    aec:          Optional[bool] = None
+    resolution:      Optional[str]  = None
+    jpeg_quality:    Optional[int]  = None
+    fps_limit:       Optional[int]  = None
+    brightness:      Optional[int]  = None
+    contrast:        Optional[int]  = None
+    saturation:      Optional[int]  = None
+    awb:             Optional[bool] = None
+    agc:             Optional[bool] = None
+    aec:             Optional[bool] = None
+    vflip:           Optional[bool] = None
+    hmirror:         Optional[bool] = None
+    special_effect:  Optional[int]  = None   # 0=Off 1=Neg 2=Gray 3=Red 4=Green 5=Blue 6=Sepia
+    wb_mode:         Optional[int]  = None   # 0=Auto 1=Sunny 2=Cloudy 3=Office 4=Home
 
 
 class FlashRequest(BaseModel):
-    state:      str = "off"      # on | off | toggle
-    brightness: Optional[int]   = None
+    state:      str          = "off"   # on | off | toggle
+    brightness: Optional[int] = None
 
 
 class StreamControlRequest(BaseModel):
     streaming: bool
 
 
-# ─────────────────────────────────────────────
+# ---------------------------------------------------------------------------
 #  AUTH DEPENDENCY
-# ─────────────────────────────────────────────
+# ---------------------------------------------------------------------------
 
-async def verify_api_key(request: Request):
+async def verify_api_key(request: Request) -> None:
     if not settings.API_KEY:
         return
     key = request.headers.get("X-API-Key", "")
@@ -60,12 +63,12 @@ async def verify_api_key(request: Request):
         raise HTTPException(status_code=401, detail="Invalid or missing API key")
 
 
-# ─────────────────────────────────────────────
+# ---------------------------------------------------------------------------
 #  APP FACTORY
-# ─────────────────────────────────────────────
+# ---------------------------------------------------------------------------
 
-def create_app(manager: CameraManager) -> FastAPI:
-    app = FastAPI(title="ESP32-CAM Streaming Server", version="1.0.0")
+def create_app(manager: CameraManager, receiver: UDPReceiver) -> FastAPI:
+    app = FastAPI(title="ESP32-CAM Streaming Server", version="2.0.0")
 
     app.add_middleware(
         CORSMiddleware,
@@ -74,7 +77,17 @@ def create_app(manager: CameraManager) -> FastAPI:
         allow_headers=["*"],
     )
 
-    # ── REST: system ────────────────────────────────────────────────────────
+    # ── REST: diagnostics (no auth — internal use) ────────────────────────────────────
+
+    @app.get("/api/diag")
+    async def diag():
+        """Full pipeline diagnostic snapshot: UDP counters + frame assembler + WS state."""
+        return {
+            "udp":    receiver.get_diag(),
+            "frames": manager.get_diag(),
+        }
+
+    # ── REST: system ─────────────────────────────────────────────────────────
 
     @app.get("/api/cameras", dependencies=[Depends(verify_api_key)])
     async def list_cameras():
@@ -94,7 +107,7 @@ def create_app(manager: CameraManager) -> FastAPI:
             raise HTTPException(status_code=404, detail="No frame available")
         return Response(content=jpeg, media_type="image/jpeg")
 
-    # ── REST: camera config proxy → ESP32 HTTP ──────────────────────────────
+    # ── REST: camera config / control proxy → ESP32 HTTP :8080 ──────────────
 
     @app.post("/api/cameras/{camera_id}/config", dependencies=[Depends(verify_api_key)])
     async def camera_config(camera_id: int, body: CameraConfigRequest):
@@ -134,18 +147,24 @@ def create_app(manager: CameraManager) -> FastAPI:
             raise HTTPException(status_code=404, detail="Camera not found")
         return await _proxy_get(cam.source_ip, "/status")
 
-    # ── WebSocket: unified frame stream ─────────────────────────────────────
+    # ── WebSocket: unified frame stream ──────────────────────────────────────
 
     @app.websocket("/ws/stream")
     async def ws_stream(websocket: WebSocket):
         """
-        Subscribers receive JSON messages:
-          { "type": "frame", "camera_id": N, "frame_id": N,
-            "latency_ms": F, "fps": F, "data": "<base64 JPEG>" }
-          { "type": "stats", "cameras": [...] }
+        Each connected client receives:
+          { "type": "frame",  "camera_id": N, "frame_id": N,
+            "latency_ms": F,  "fps": F, "data": "<base64 JPEG>" }
+          { "type": "stats",  "cameras": [...] }
+          { "type": "ping" }   (keepalive every 5 s when idle)
         """
         await websocket.accept()
-        q: asyncio.Queue = asyncio.Queue(maxsize=60)
+        # Keep queue shallow: hold at most 4 frames.
+        # With maxsize=60 a slow client or reconnect drains a 2-second
+        # backlog all at once, causing the browser to decode dozens of
+        # frames concurrently and render them out-of-order (distortion).
+        # 4 slots = ~130 ms at 30fps — enough to absorb brief network jitter.
+        q: asyncio.Queue = asyncio.Queue(maxsize=4)
         manager.subscribe(q)
         log.info(f"WS client connected: {websocket.client}")
 
@@ -154,7 +173,7 @@ def create_app(manager: CameraManager) -> FastAPI:
                 await asyncio.sleep(1.0)
                 try:
                     await websocket.send_json({
-                        "type": "stats",
+                        "type":    "stats",
                         "cameras": manager.get_all_camera_stats(),
                     })
                 except Exception:
@@ -167,7 +186,6 @@ def create_app(manager: CameraManager) -> FastAPI:
                     msg = await asyncio.wait_for(q.get(), timeout=5.0)
                     await websocket.send_json(msg)
                 except asyncio.TimeoutError:
-                    # Send keepalive ping
                     try:
                         await websocket.send_json({"type": "ping"})
                     except Exception:
@@ -183,10 +201,10 @@ def create_app(manager: CameraManager) -> FastAPI:
             manager.unsubscribe(q)
             log.info(f"WS client disconnected: {websocket.client}")
 
-    # ── Background: poll camera /status every 30 s ─────────────────────────
+    # ── Background: poll camera /status every 30 s ───────────────────────────
 
     async def _poll_status_loop():
-        """Refresh resolution + wifi_rssi from each ESP32 every 30 s."""
+        """Refresh resolution + wifi_rssi + sensor settings from each ESP32."""
         while True:
             await asyncio.sleep(30)
             for camera_id in manager.get_camera_ids():
@@ -199,20 +217,25 @@ def create_app(manager: CameraManager) -> FastAPI:
                         resp = await client.get(url)
                         resp.raise_for_status()
                         data = resp.json()
-                    if "resolution" in data:
-                        cam.resolution = data["resolution"]
-                    if "wifi_rssi" in data:
-                        cam.wifi_rssi = data["wifi_rssi"]
-                    if "jpeg_quality" in data:
-                        cam.jpeg_quality = data["jpeg_quality"]
+                    for key, attr in [
+                        ("resolution",     "resolution"),
+                        ("jpeg_quality",   "jpeg_quality"),
+                        ("wifi_rssi",      "wifi_rssi"),
+                        ("vflip",          "vflip"),
+                        ("hmirror",        "hmirror"),
+                        ("special_effect", "special_effect"),
+                        ("wb_mode",        "wb_mode"),
+                    ]:
+                        if key in data:
+                            setattr(cam, attr, data[key])
                 except Exception as exc:
                     log.debug(f"[CAM#{camera_id}] status poll failed: {exc}")
 
     @app.on_event("startup")
-    async def _start_status_poller():
+    async def _start_background_tasks():
         asyncio.create_task(_poll_status_loop())
 
-    # ── Static dashboard ────────────────────────────────────────────────────
+    # ── Static dashboard ─────────────────────────────────────────────────────
 
     if STATIC_DIR.exists():
         app.mount("/static", StaticFiles(directory=str(STATIC_DIR / "static")), name="static")
@@ -224,19 +247,19 @@ def create_app(manager: CameraManager) -> FastAPI:
     else:
         @app.get("/", response_class=HTMLResponse)
         async def dashboard_missing():
-            return HTMLResponse("<h1>Dashboard not found</h1><p>Place dashboard/ next to server/</p>")
+            return HTMLResponse("<h1>Dashboard not found</h1>", status_code=404)
 
     return app
 
 
-# ─────────────────────────────────────────────
+# ---------------------------------------------------------------------------
 #  PROXY HELPERS
-# ─────────────────────────────────────────────
+# ---------------------------------------------------------------------------
 
 async def _proxy_post(ip: str, path: str, payload: dict) -> dict:
     url = f"http://{ip}:8080{path}"
     try:
-        async with httpx.AsyncClient(timeout=3.0) as client:
+        async with httpx.AsyncClient(timeout=5.0) as client:
             resp = await client.post(url, json=payload)
             resp.raise_for_status()
             return resp.json()
@@ -249,7 +272,7 @@ async def _proxy_post(ip: str, path: str, payload: dict) -> dict:
 async def _proxy_get(ip: str, path: str) -> dict:
     url = f"http://{ip}:8080{path}"
     try:
-        async with httpx.AsyncClient(timeout=3.0) as client:
+        async with httpx.AsyncClient(timeout=5.0) as client:
             resp = await client.get(url)
             resp.raise_for_status()
             return resp.json()

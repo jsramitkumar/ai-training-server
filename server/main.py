@@ -1,6 +1,6 @@
 """
-Ultra-Low-Latency Multi-Camera UDP Streaming Server
-====================================================
+Multi-Camera UDP Streaming Server
+==================================
 Entrypoint: python main.py
 """
 
@@ -8,28 +8,26 @@ import asyncio
 import logging
 import signal
 import sys
+
 from app import create_app
-from udp_receiver import UDPReceiver
 from camera_manager import CameraManager
+from udp_receiver import UDPReceiver
 from config import settings
 
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
     datefmt="%H:%M:%S",
-    handlers=[
-        logging.StreamHandler(sys.stdout),
-    ],
+    handlers=[logging.StreamHandler(sys.stdout)],
 )
 log = logging.getLogger("main")
 
 
 async def run():
-    manager = CameraManager()
+    manager  = CameraManager()
     receiver = UDPReceiver(manager, settings.UDP_HOST, settings.UDP_PORT)
-    app = create_app(manager)
+    app      = create_app(manager, receiver)
 
-    # Start UDP receiver
     await receiver.start()
 
     import uvicorn
@@ -43,10 +41,33 @@ async def run():
     )
     server = uvicorn.Server(config)
 
-    log.info(f"UDP  listener : {settings.UDP_HOST}:{settings.UDP_PORT}")
-    log.info(f"HTTP dashboard: http://{settings.HTTP_HOST}:{settings.HTTP_PORT}")
+    log.info(f"HTTP dashboard : http://{settings.HTTP_HOST}:{settings.HTTP_PORT}")
+    log.info(f"UDP receiver   : udp://{settings.UDP_HOST}:{settings.UDP_PORT}")
+    log.info(f"Freshness limit: {settings.FRESHNESS_MS} ms")
+    log.info(f"Diagnostics    : http://{settings.HTTP_HOST}:{settings.HTTP_PORT}/api/diag")
 
     loop = asyncio.get_running_loop()
+
+    async def _stats_logger():
+        """Log pipeline summary every 5 seconds."""
+        while True:
+            await asyncio.sleep(5)
+            d    = manager.get_diag()
+            udpd = receiver.get_diag()
+            cams = ", ".join(
+                f"cam{c['camera_id']}({c['fps']}fps drop={c['frames_dropped']})"
+                for c in d["cameras"]
+            ) or "none"
+            log.info(
+                f"[STATS] udp_pkts={udpd['total_packets']}  "
+                f"assembled={d['global_frames_assembled']}  "
+                f"pushed={d['global_frames_pushed']}  "
+                f"stale={d['global_frames_stale']}  "
+                f"ws_subs={d['ws_subscribers']}  "
+                f"cameras=[{cams}]"
+            )
+
+    asyncio.create_task(_stats_logger())
 
     def _stop():
         log.info("Shutdown signal received")
@@ -56,10 +77,10 @@ async def run():
         try:
             loop.add_signal_handler(sig, _stop)
         except NotImplementedError:
-            pass  # Windows
+            pass  # Windows does not support add_signal_handler
 
     await server.serve()
-    await receiver.stop()
+    receiver.stop()
     log.info("Server stopped cleanly")
 
 
